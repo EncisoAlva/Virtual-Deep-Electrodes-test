@@ -178,14 +178,14 @@ end
 ndigits   = ceil(log10(nIS));
 formatStr = strcat("%",num2str(ndigits),"d");
 
-ElecTable_pre  = zeros(nIS,3); 
-ElecLabels     = cell(nIS,1);
+ElecTable_pre  = zeros(nPA*nLR,3); 
+ElecLabels     = cell(nPA*nLR,1);
 
 counter   = 1;
 for ii = 1:nIS
   ElecTable_pre(counter,:) = reshape(ElecLocs(ii,:),[1,3]) ...
     + center_old; % undo the re-center
-  ElecLabels{counter}  = strcat(CurrentLabel,num2str(nIS-counter+1,formatStr));
+  ElecLabels{counter}  = strcat(CurrentLabel,num2str(counter,formatStr));
   counter = counter+1;
 end
 

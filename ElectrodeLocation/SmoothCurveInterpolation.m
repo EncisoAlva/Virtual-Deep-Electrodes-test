@@ -38,12 +38,15 @@ Strip = surf(abs(cos(th)*(surf(:,y)-y0) - sin(th)*(surf(:,x)-x0)) < w, :);
 % curve fitting using loess
 SmoothCurve = fit( Strip(:,[x,y]), Strip(:,z), 'lowess' );
 
-npts  = max( vecnorm(Strip(:,[x,y])-[x0,y0],2,2) )/dt;
+npts  = ceil(max( vecnorm(Strip(:,[x,y])-[x0,y0],2,2) )/dt);
 xRan  = x0 + cos(th)*dt*(0:npts);
 yRan  = y0 + sin(th)*dt*(0:npts);
 zRan  = feval( SmoothCurve, [xRan', yRan'] );
-
 Curve = [xRan', yRan', zRan];
+
+% remove points outside the brain
+hull  = surf(convhull(surf(:,1), surf(:,2)), :);
+Curve = Curve( inpolygon( Curve(:,1),Curve(:,2), hull(:,1),hull(:,2) ), :);
 
 if(imshow)
     figure()
@@ -54,5 +57,7 @@ if(imshow)
     hold on
     scatter3(Strip(:,1),Strip(:,2),Strip(:,3),100,'k','filled')
     scatter3(Curve(:,1),Curve(:,2),Curve(:,3),100,'g','filled')
+    scatter3(hull(:,1),hull(:,2),hull(:,3),100,'y','filled')
+    scatter3(x0,y0,feval( SmoothCurve, [x0, y0] ),200,'r','filled')
 end
 end

@@ -1,5 +1,5 @@
-function [ElecLocs] = PlaceSurfaceElectrodesIdeal( ...
-  surface, nPA, nLR, PA0, LR0, dPA, dLR, TH, ...
+function [ElectrodeLocations] = PlaceSurfaceElectrodesIdeal( ...
+  surface, nPA, nLR, PA0, LR0, dPA, dLR, TH, labels, ...
   params, debug )
 % This script determine locations of an NxM surface electordes following 
 % this simple protocol:
@@ -21,7 +21,7 @@ function [ElecLocs] = PlaceSurfaceElectrodesIdeal( ...
 %
 %-------------------------------------------------------------------------
 % INPUT
-%    V  surface  Surface triangulation with these fields
+%    >  surface  Surface triangulation with these fields
 %    |.Vertices  Location of triangles' edges, (# vertices)x3
 %    |   .Faces  Triangulation, (# triangles)x3
 %           nPA  Size of rectangle grid in the Posterior-Anterior
@@ -32,21 +32,26 @@ function [ElecLocs] = PlaceSurfaceElectrodesIdeal( ...
 %                Posterior-Anterior direction
 %           dLR  Center-to-center distance between electrodes in the
 %                Left-Rigt direction
-%      V params  Parameters
+%      > params  Parameters
 %      |  .Side  Which hemisphere: Left, Right, Both
 %      | .Strip  Width of 
 %
 %-------------------------------------------------------------------------
 % OUTPUT
-%      ElecLocs  Locations of electrodes, (nAP)x(nLR)x3
+% ElectrodeLocations  Locations of electrodes, (nAP*nLR)x3
 %
 %-------------------------------------------------------------------------
 % Author: Julio Cesar Enciso-Alva, 2023
 %         juliocesar.encisoalva@uta.edu
 %
 
+
 % rename of parameters
-coord = surface.Vertices;
+coord_og = surface.Vertices;
+range_old  = range(coord_og,1);
+center_old = min(coord_og,[],1) + range_old/2;
+coord_og = coord_og - center_old;
+coord = coord_og;
 
 switch params.Side
   case 'Left'
@@ -60,8 +65,6 @@ switch params.Side
     disp('WARNING: Select a side to place electrodes.')
 end
 
-ElecLocs      = zeros(nLR, nPA, 3); % cntainer for results
-
 % notes to self of coordinates
 %  1  x  Posterior-Anterior (reverse Anterior-Posterior)
 %  2  y  Left-Right
@@ -73,7 +76,7 @@ dir.IS = 3;
 %% IDENTIFICATION OF ANTERIOR EDGE
 % defined by it's visual location, computed iteratively for robustness
 iter = 1; flag=true; ptEDGE_old = [Inf,Inf,Inf];
-while (iter < params.MaxIter) && flag
+while (iter < params.max_iter) && flag
   if iter == 1
     [maxPA,~] = max( coord(:,dir.PA) );
     %[maxPA,idxPA] = max( coord(:,dir.PA) );
@@ -112,9 +115,9 @@ if debug.figs
   subtitle('Sagittal View')
   hold on 
   scatter(coord(idxEDGE,1),coord(idxEDGE,3),200,'r','filled')
-  legend({[],'Anterior Edge'})
   scatter(ptPA(1),ptPA(3),200,'k','filled')
   scatter(ptIS(1),ptIS(3),200,'k','filled')
+  legend({'','Anterior Edge','',''}, 'Location','southwest')
 end
 
 coord = coord( coord(:,dir.IS) >= ptEDGE(dir.IS) ,:); % only upper part is relevant
@@ -127,47 +130,50 @@ coord = coord( coord(:,dir.IS) >= ptEDGE(dir.IS) ,:); % only upper part is relev
 % 5. TODO correction for robustness
 
 for lazy_counter = 1:length(ElectSide)
-CurrentSide = ElectSide{lazy_counter};
+
+ElecLocs     = zeros(nLR, nPA, 3); % cntainer for results
+CurrentSide  = ElectSide{lazy_counter};
+CurrentLabel = labels{lazy_counter};
 switch CurrentSide
   case 'Left'
+    disp('left side')
     dLR = -abs(dLR);
     TH  = -abs(TH );
     sg  = -1;
-  case 'Rigth'
+  case 'Right'
+    disp('non-left side')
     dLR =  abs(dLR);
     TH  =  abs(TH );
     sg  =  1;
 end
 
 % find the first point by first looking at the PA distance and ten the 
-CtrlStrip = coord( coord(:,dis.LR) < params.vis_width, : );
+CtrlStrip = coord( abs(coord(:,dir.LR)) < params.vis_width, : );
 CtrlLine  = SmoothCurveInterpolation( coord, ...
-  min( CtrlStrip(:,dir.PA) ), 0, 180, params.vis_width, 0.0001 );
+  min( CtrlStrip(:,dir.PA) ), 0, 0, params.vis_width, 0.0001, debug.figs_detail );
 
-tmpPt = PointsInCurve( CtrlLine, PA0, dPA, 1 );
+tmpPt = PointsInCurve( CtrlLine, [min( CtrlStrip(:,dir.PA) ), 0], PA0, dPA, 1 );
 auxLR = SmoothCurveInterpolation( coord, ...
-  tmpPt(dir.PA), tmpPt(dir.PA), sg*90, params.vis_width, 0.0001 );
+  tmpPt(dir.PA), tmpPt(dir.LR), sg*90, params.vis_width, 0.0001, debug.figs_detail );
 
-FirstPt = PointsInCurve( auxLR, LR0, dLR, 1 );
+FirstPt = PointsInCurve( auxLR, [tmpPt(dir.PA), tmpPt(dir.LR)], LR0, dLR, 1 );
 ElecLocs(1,1,:) = FirstPt;
 
 % iterate over Posterior-Anterio, then over Left-Right
 auxPA = SmoothCurveInterpolation( coord, ...
-  FirstPt(dir.PA), FirstPt(dir.LR), TH, params.vis_width, 0.0001 );
-ElecLocs(1:nPA,1,:) = PointsInCurve( auxPA, 0, dPA, nPA );
+  FirstPt(dir.PA), FirstPt(dir.LR), TH, params.vis_width, 0.0001, debug.figs_detail );
+ElecLocs(1,1:nPA,:) = PointsInCurve( auxPA, [FirstPt(dir.PA), FirstPt(dir.LR)], 0, dPA, nPA );
 
 for ii = 1:nPA
-  refPt = ElecLocs(ii,1,:);
+  refPt = reshape(ElecLocs(1,ii,:), [1,3]);
   auxLR = SmoothCurveInterpolation( coord, ...
-    refPt(dir.PA), refPt(dir.LR), TH+sg*90, params.vis_width, 0.0001 );
-  ElecLocs(ii,1:nLR,:) = PointsInCurve( auxLR, 0, dLR, nLR );
-end
-
+    refPt(dir.PA), refPt(dir.LR), -TH+sg*90, params.vis_width, 0.0001, debug.figs_detail );
+  ElecLocs(1:nLR,ii,:) = PointsInCurve( auxLR, refPt([dir.PA, dir.LR]), 0, dLR, nLR );
 end
 
 if(debug.figs)
     figure()
-    trisurf(surface.Faces, coord(:,1),coord(:,2),coord(:,3),...
+    trisurf(surface.Faces, coord_og(:,1),coord_og(:,2),coord_og(:,3),...
         'FaceColor',[.85 .85 .85],'FaceAlpha',.4)
     xlabel('Posterior-Anterior')
     ylabel('Left-Right')
@@ -176,10 +182,39 @@ if(debug.figs)
     hold on
     for ii = 1:nPA
       for jj = 1:nLR
-        scatter3(ElecLocs(ii,jj,1),ElecLocs(ii,jj,2),ElecLocs(ii,jj,3),'filled')
+        scatter3(ElecLocs(jj,ii,1),ElecLocs(jj,ii,2),ElecLocs(jj,ii,3),...
+          200,'r','filled')
       end
     end
 end
 
-writematrix(ElecLocs)
+
+ndigits   = ceil(log10(nPA*nLR));
+formatStr = strcat("%",num2str(ndigits),"d");
+
+ElecTable_pre  = zeros(nPA*nLR,3); 
+ElecLabels     = cell(nPA*nLR,1);
+
+counter   = 1;
+for lr = 1:nLR
+for pa = 1:nPA
+  ElecTable_pre(counter,:) = reshape(ElecLocs(lr,pa,:),[1,3]) ...
+    + center_old; % undo the re-center
+  ElecLabels{counter}  = strcat(CurrentLabel,num2str(counter,formatStr));
+  counter = counter+1;
+end
+end
+
+ElecTable = array2table(ElecTable_pre, 'VariableNames',{'PA','LR','IS'});
+ElecTable.label = ElecLabels;
+
+if lazy_counter==1
+  ElectrodeLocations = ElecTable;
+else
+  ElectrodeLocations = [ElectrodeLocations; ElecTable];
+end
+
+end
+
+writetable(ElectrodeLocations,'SurfaceElectrodes.csv')
 end
